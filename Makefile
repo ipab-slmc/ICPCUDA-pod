@@ -32,11 +32,9 @@ ifeq ($(shell uname), Darwin)
 endif
 
 all: pod-build/Makefile
-	@echo "kjk"
 	$(MAKE) -C pod-build all #install
 
 pod-build/Makefile:
-	@echo "kjk2"
 	$(MAKE) configure
 
 .PHONY: configure
@@ -46,13 +44,9 @@ configure: $(UNZIP_DIR)/src/CMakeLists.txt
 	# create the temporary build directory if needed
 	@mkdir -p pod-build
 
-	@echo "kjk222	"
-
 	# create the lib directory if needed, so the pkgconfig gets installed to the right place
 	@mkdir -p $(BUILD_PREFIX)/lib
 	@mkdir -p $(BUILD_PREFIX)/lib/pkgconfig
-
-	@echo "kjk222	3"
 
 	# run CMake to generate and configure the build scripts
 	@cd pod-build && cmake -DCMAKE_INSTALL_PREFIX=$(BUILD_PREFIX) \
