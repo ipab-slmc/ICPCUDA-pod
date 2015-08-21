@@ -1,7 +1,4 @@
-DL_LINK   = http://bitbucket.org/eigen/eigen/get/3.2.1.tar.gz
-DL_NAME   = 3.2.1.tar.gz
-UNZIP_DIR = ICPCUDA
-
+# Default pod makefile distributed with pods version: 12.11.14
 
 default_target: all
 
@@ -26,36 +23,27 @@ ifeq "$(BUILD_TYPE)" ""
 BUILD_TYPE="Release"
 endif
 
-SED=sed
-ifeq ($(shell uname), Darwin)
-  SED=gsed
-endif
-
 all: pod-build/Makefile
-	$(MAKE) -C pod-build all #install
+	$(MAKE) -C pod-build all install
 
 pod-build/Makefile:
 	$(MAKE) configure
 
 .PHONY: configure
-configure: $(UNZIP_DIR)/src/CMakeLists.txt
+configure:
 	@echo "\nBUILD_PREFIX: $(BUILD_PREFIX)\n\n"
 
 	# create the temporary build directory if needed
 	@mkdir -p pod-build
 
-	# create the lib directory if needed, so the pkgconfig gets installed to the right place
-	@mkdir -p $(BUILD_PREFIX)/lib
-	@mkdir -p $(BUILD_PREFIX)/lib/pkgconfig
-
 	# run CMake to generate and configure the build scripts
 	@cd pod-build && cmake -DCMAKE_INSTALL_PREFIX=$(BUILD_PREFIX) \
-		   -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) ../$(UNZIP_DIR)/src
-
-#$(UNZIP_DIR)/CMakeLists.txt:
-#	wget --no-check-certificate $(DL_LINK) && tar -xzf $(DL_NAME) && rm $(DL_NAME)
-#	$(SED) -i -e 's@share/pkgconfig@lib/pkgconfig@g' $(UNZIP_DIR)/CMakeLists.txt
+		   -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) ..
 
 clean:
 	-if [ -e pod-build/install_manifest.txt ]; then rm -f `cat pod-build/install_manifest.txt`; fi
 	-if [ -d pod-build ]; then $(MAKE) -C pod-build clean; rm -rf pod-build; fi
+
+# other (custom) targets are passed through to the cmake-generated Makefile 
+%::
+	$(MAKE) -C pod-build $@
