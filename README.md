@@ -16,3 +16,9 @@ Then make with one core:
    cd ..
    make -j 1
 
+
+Test program:
+
+ICP  ~/logs/kinect/rgbd_dataset_freiburg1_desk/ -v
+
+Mihgt need to run with sudo permisions on first run
