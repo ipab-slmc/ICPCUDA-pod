@@ -16,6 +16,7 @@ add_definitions(-Wall )
 find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS thread filesystem system REQUIRED)
 find_package(CUDA REQUIRED)
+find_package(ZLIB REQUIRED)
 
 #remove this as soon as eigen is shipped with FindEigen.cmake
   get_filename_component(EIGEN_ROOT "/usr/include/eigen3" PATH)
@@ -53,10 +54,10 @@ CUDA_COMPILE(cuda_objs ${cuda})
 
 add_executable (se-icpcuda-original icpcuda-app-original.cpp)
 target_link_libraries(se-icpcuda-original boost_system ${OpenCV_LIBS} ${CUDA_LIBRARIES} /usr/lib/x86_64-linux-gnu/libcuda.so
-                      /usr/lib/x86_64-linux-gnu/libcudart.so /usr/lib/x86_64-linux-gnu/libicudata.so 
+                      /usr/lib/x86_64-linux-gnu/libcudart.so /usr/lib/x86_64-linux-gnu/libicudata.so   ${ZLIB_LIBRARIES}
                       /home/mfallon/otherprojects/pronto-distro/build/lib/libicpcuda.so)
-pods_use_pkg_config_packages(se-icpcuda-original icpcuda
-  lcm
+pods_use_pkg_config_packages(se-icpcuda-original 
+  lcm 
   lcmtypes_bot2-core
   )
 pods_install_executables(se-icpcuda-original)

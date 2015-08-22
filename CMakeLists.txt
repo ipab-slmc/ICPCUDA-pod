@@ -85,8 +85,8 @@ pods_install_executables(icpcuda-app-original)
 
 
 add_executable(se-icpcuda src/icpcuda-app/icpcuda-app.cpp ${srcs} ${cuda} ${cuda_objs} ${containers})
-target_link_libraries(se-icpcuda ${Boost_LIBRARIES} ${OpenCV_LIBS} ${Eigen_LIBRARIES} ${CUDA_LIBRARIES})
-pods_use_pkg_config_packages(se-icpcuda eigen3 
+target_link_libraries(se-icpcuda ${Boost_LIBRARIES} ${OpenCV_LIBS} ${Eigen_LIBRARIES} ${CUDA_LIBRARIES} z)
+pods_use_pkg_config_packages(se-icpcuda eigen3  
   lcm lcmtypes_kinect
   lcmtypes_bot2-core) 
 pods_install_executables(se-icpcuda)
