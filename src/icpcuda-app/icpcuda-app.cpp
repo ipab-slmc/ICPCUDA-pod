@@ -39,6 +39,7 @@ class App{
     void kinectHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  kinect::frame_msg_t* msg);
 
     uint64_t loadDepth(cv::Mat1w & depth);
+    uint64_t loadDepthNew(cv::Mat1w & depth);
 
     bool init_;
     std::string directory_;
@@ -160,26 +161,30 @@ uint64_t App::loadDepth(cv::Mat1w & depth)
     }
   }
 
+  return time;
+}
 
 
-  ofstream myfile ("out.txt");
-  if (myfile.is_open()){
+uint64_t App::loadDepthNew(cv::Mat1w & depth)
+{
 
-    for(unsigned int i = 0; i < 480; i++){
-      for(unsigned int j = 0; j < 640; j++){
-        myfile << depth.at<unsigned short>(i, j);
+  std::stringstream depthLoc;
+  depthLoc << "./png/" << output_counter_ << ".png";
 
-        if (j>0)
-          myfile << ", ";
-      }
-      myfile << "\n";
-    }    
-    myfile.close();
+  depth = cv::imread(depthLoc.str(), CV_LOAD_IMAGE_ANYDEPTH);
 
+  std::cout << depthLoc.str() << "\n";
+
+
+  uint64_t time = 0;
+
+  for(unsigned int i = 0; i < 480; i++)
+  {
+    for(unsigned int j = 0; j < 640; j++)
+    {
+      depth.at<unsigned short>(i, j) /= 5;
+    }
   }
-  else cout << "Unable to open file";
-  
-
 
   return time;
 }
@@ -263,9 +268,18 @@ void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
   if (!init_){
 
     if (cl_cfg_.process_incoming){
-      firstRaw.data = (uint8_t*) msg->depth.depth_data.data();
-    }else
-      loadDepth(firstRaw);
+      //memcpy(buf_,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
+      //firstRaw.data = buf_;
+
+      //firstRaw.data = (uint8_t*) msg->depth.depth_data.data();
+      
+      memcpy(firstRaw.data,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
+
+     // prefilterData(firstRaw); 
+    }else{
+//      loadDepth(firstRaw);
+      loadDepthNew(firstRaw);
+    }
 
     init_ = true;
   }else{
@@ -274,16 +288,19 @@ void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
     int blocks = 96;
 
     if (cl_cfg_.process_incoming){
-      memcpy(buf_,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
-      secondRaw.data = buf_;
-      //secondRaw.data = (uint8_t*) msg->depth.depth_data.data();
+      //memcpy(buf_,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
+      //secondRaw.data = buf_;
+      // secondRaw.data = (uint8_t*) msg->depth.depth_data.data();
+
+      memcpy(secondRaw.data,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
     }else{
-      loadDepth(secondRaw);
+//      loadDepth(secondRaw);
+      loadDepthNew(secondRaw);
     }
 
 
-//    writePngFile(secondRaw);
-  //  prefilterData(secondRaw);
+   // writePngFile(secondRaw);
+   // prefilterData(secondRaw);
 
     //writeRawFile(secondRaw);
     output_counter_++;
