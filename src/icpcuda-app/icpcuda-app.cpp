@@ -37,7 +37,7 @@ class App{
   private:
     const CommandLineConfig cl_cfg_;    
     boost::shared_ptr<lcm::LCM> lcm_;
-    void imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
+    //void imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void kinectHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  kinect::frame_msg_t* msg);
 
     uint64_t loadDepth(cv::Mat1w & depth);
@@ -66,7 +66,7 @@ class App{
 
 App::App(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) : 
        lcm_(lcm_), cl_cfg_(cl_cfg_){
-  lcm_->subscribe("CAMERA",&App::imagesHandler,this);
+  //lcm_->subscribe("CAMERA",&App::imagesHandler,this);
   lcm_->subscribe("KINECT_FRAME",&App::kinectHandler,this);
 
   cudaDeviceProp prop;
@@ -279,9 +279,9 @@ void App::writeRawFile(cv::Mat1w & depth){
   else cout << "Unable to open file";
 }
 
-void App::imagesHandler(const lcm::ReceiveBuffer* rbuf,
-     const std::string& channel, const  bot_core::images_t* msg){
-}
+//void App::imagesHandler(const lcm::ReceiveBuffer* rbuf,
+//     const std::string& channel, const  bot_core::images_t* msg){
+//}
 
 
 void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
