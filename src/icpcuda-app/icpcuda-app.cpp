@@ -23,7 +23,7 @@ struct CommandLineConfig
 {
   bool verbose;
   bool process_incoming;
-  bool fast_mode;
+  bool slow_mode;
   bool init_rotated;
 };
 
@@ -51,7 +51,7 @@ class App{
     cv::Mat1w currImage;
     ICPOdometry* icpOdom;
     ICPSlowdometry* icpSlowdom;
-    Eigen::Matrix4f currPose, prevPose;
+    Eigen::Matrix4d currPose, prevPose;
     int64_t prevUtime, currUtime;
 
 
@@ -87,7 +87,7 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) :
   icpSlowdom = new ICPSlowdometry(640, 480, 320, 240, 528, 528);
 
   currImage = cv::Mat1w (480, 640);
-  currPose = Eigen::Matrix4f::Identity();
+  currPose = Eigen::Matrix4d::Identity();
   if (cl_cfg_.init_rotated){
     currPose.topLeftCorner(3, 3) <<  0,  0, 1, -1,  0, 0, 0, -1, 0;
   }
@@ -101,11 +101,11 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) :
   output_counter_=0;
 }
 
-void quat_to_euler(Eigen::Quaternionf q, float& roll, float& pitch, float& yaw) {
-  const float q0 = q.w();
-  const float q1 = q.x();
-  const float q2 = q.y();
-  const float q3 = q.z();
+void quat_to_euler(Eigen::Quaterniond q, double& roll, double& pitch, double& yaw) {
+  const double q0 = q.w();
+  const double q1 = q.x();
+  const double q2 = q.y();
+  const double q3 = q.z();
   roll = atan2(2*(q0*q1+q2*q3), 1-2*(q1*q1+q2*q2));
   pitch = asin(2*(q0*q2-q3*q1));
   yaw = atan2(2*(q0*q3+q1*q2), 1-2*(q2*q2+q3*q3));
@@ -113,14 +113,14 @@ void quat_to_euler(Eigen::Quaternionf q, float& roll, float& pitch, float& yaw) 
 
 
 // Difference the transform and scale by elapsed time:
-void getTransAsVelocityTrans(Eigen::Matrix4f currPose, int64_t currUtime, Eigen::Matrix4f prevPose, int64_t prevUtime, Eigen::Vector3f &linRate, Eigen::Vector3f &rotRate){
+void getTransAsVelocityTrans(Eigen::Matrix4d currPose, int64_t currUtime, Eigen::Matrix4d prevPose, int64_t prevUtime, Eigen::Vector3d &linRate, Eigen::Vector3d &rotRate){
   double elapsed_time = (currUtime - prevUtime)*1E-6;
-  Eigen::Isometry3f currPoseIso(currPose);
-  Eigen::Isometry3f prevPoseIso(prevPose);
-  Eigen::Isometry3f deltaPoseIso = prevPoseIso.inverse()*currPoseIso;
+  Eigen::Isometry3d currPoseIso(currPose);
+  Eigen::Isometry3d prevPoseIso(prevPose);
+  Eigen::Isometry3d deltaPoseIso = prevPoseIso.inverse()*currPoseIso;
   linRate = deltaPoseIso.translation()/elapsed_time;
-  Eigen::Quaternionf deltaRotQuat =  Eigen::Quaternionf(deltaPoseIso.rotation());
-  Eigen::Vector3f deltaRot;
+  Eigen::Quaterniond deltaRotQuat =  Eigen::Quaterniond(deltaPoseIso.rotation());
+  Eigen::Vector3d deltaRot;
   quat_to_euler(deltaRotQuat, deltaRot(0), deltaRot(1), deltaRot(2));
   rotRate = deltaRot/elapsed_time;
 
@@ -135,10 +135,10 @@ void getTransAsVelocityTrans(Eigen::Matrix4f currPose, int64_t currUtime, Eigen:
   }
 }
 
-bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4f currPose, int64_t currUtime, Eigen::Matrix4f prevPose, int64_t prevUtime){
-  Eigen::Vector3f trans_out = currPose.topRightCorner(3, 1);
-  Eigen::Matrix3f rot_out = currPose.topLeftCorner(3, 3);
-  Eigen::Quaternionf r_x(rot_out);
+bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4d currPose, int64_t currUtime, Eigen::Matrix4d prevPose, int64_t prevUtime){
+  Eigen::Vector3d trans_out = currPose.topRightCorner(3, 1);
+  Eigen::Matrix3d rot_out = currPose.topLeftCorner(3, 3);
+  Eigen::Quaterniond r_x(rot_out);
 
   bot_core::pose_t pose_msg;
   pose_msg.utime =   currUtime;
@@ -150,7 +150,7 @@ bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4f currPose, int64_t currUtime, E
   pose_msg.orientation[2] =  r_x.y();  
   pose_msg.orientation[3] =  r_x.z();  
 
-  Eigen::Vector3f linRate, rotRate;
+  Eigen::Vector3d linRate, rotRate;
   getTransAsVelocityTrans(currPose, currUtime, prevPose, prevUtime, linRate, rotRate);
   pose_msg.vel[0] = linRate[0];
   pose_msg.vel[1] = linRate[1];
@@ -335,25 +335,27 @@ void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
     init_ = true;
   }else{
     output_counter_++;
-    int threads = 128; // these params should be optimized using test program
-    int blocks = 96;
+    // these params should be optimized using test program
+    // originally i used 128 threads and 96 blocks
+    int threads = 128; 
+    int blocks = 48;
 
-    Eigen::Vector3f trans = currPose.topRightCorner(3, 1);
-    Eigen::Matrix<float, 3, 3, Eigen::RowMajor> rot = currPose.topLeftCorner(3, 3);
-    if (cl_cfg_.fast_mode==1){
-      icpOdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose);
+    Eigen::Vector3f trans_f = currPose.topRightCorner(3, 1).cast <float> ();
+    Eigen::Matrix<float, 3, 3, Eigen::RowMajor> rot_f = currPose.topLeftCorner(3, 3).cast <float> ();
+    if (!cl_cfg_.slow_mode){
+      icpOdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose.cast <float> () );
       icpOdom->initICP((unsigned short *)currImage.data, 20.0f);
-      icpOdom->getIncrementalTransformation(trans, rot, threads, blocks);
+      icpOdom->getIncrementalTransformation(trans_f, rot_f, threads, blocks);
     }else{
-      icpSlowdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose);
+      icpSlowdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose.cast <float> () );
       icpSlowdom->initICP((unsigned short *)currImage.data, 20.0f);
-      icpSlowdom->getIncrementalTransformation(trans, rot);
+      icpSlowdom->getIncrementalTransformation(trans_f, rot_f);
     }
-    currPose.topLeftCorner(3, 3) = rot;
-    currPose.topRightCorner(3, 1) = trans;
+    currPose.topLeftCorner(3, 3) = rot_f.cast <double> ();
+    currPose.topRightCorner(3, 1) = trans_f.cast <double> ();
   }
 
-  // 4. Pu
+  // 4. Publish pose back
   bot_core::pose_t pose_msg = getPoseAsBotPose( currPose , currUtime, prevPose , prevUtime);
   lcm_->publish("POSE_BODY", &pose_msg );
   std::swap(prevImage, currImage); // second copied into first
@@ -365,13 +367,13 @@ int main(int argc, char **argv){
   CommandLineConfig cl_cfg;
   cl_cfg.verbose = false;
   cl_cfg.process_incoming = true;
-  cl_cfg.fast_mode = true; // true is use fast mode, else use slow mode
+  cl_cfg.slow_mode = false; // true is use fast mode, else use slow mode
   cl_cfg.init_rotated = false;
 
   ConciseArgs parser(argc, argv, "icpcuda-app");
   parser.add(cl_cfg.verbose, "v", "verbose", "Verbose printf");
   parser.add(cl_cfg.process_incoming, "i", "process_incoming", "process_incoming");
-  parser.add(cl_cfg.fast_mode, "f", "fast_mode", "fast_mode (else slow)");
+  parser.add(cl_cfg.slow_mode, "s", "slow_mode", "slow_mode (default is fast)");
   parser.add(cl_cfg.init_rotated, "r", "init_rotated", "init_rotated with z forward, x right");
   parser.parse();
   
