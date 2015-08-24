@@ -9,9 +9,6 @@
 #include <Eigen/Dense>
 #include <Eigen/StdVector>
 
-#include <bot_param/param_client.h>
-#include <bot_frames/bot_frames.h>
-
 #include <icpcuda/ICPOdometry.h>
 #include <icpcuda/ICPSlowdometry.h>
 
@@ -40,10 +37,6 @@ class App{
   private:
     const CommandLineConfig cl_cfg_;    
     boost::shared_ptr<lcm::LCM> lcm_;
-
-    BotParam* botparam_;
-    BotFrames* botframes_;
-
     //void imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void kinectHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  kinect::frame_msg_t* msg);
 
@@ -54,17 +47,13 @@ class App{
     std::string directory_;
 
 
-    cv::Mat1w prevImage_;
-    cv::Mat1w currImage_;
+    cv::Mat1w prevImage;
+    cv::Mat1w currImage;
     ICPOdometry* icpOdom;
     ICPSlowdometry* icpSlowdom;
-    Eigen::Matrix4d currLocalToCamera_, prevLocalToCamera_;
-    int64_t prevUtime_, currUtime_;
+    Eigen::Matrix4d currPose, prevPose;
+    int64_t prevUtime, currUtime;
 
-    Eigen::Isometry3d BodyToCamera_; // Fixed tf from the lidar to the robot's base link
-    Eigen::Isometry3d worldToBodyInit_; // Captures the position of the body frame in world at launch
-    Eigen::Isometry3d currWorldToBody_; // running position estimate
-    Eigen::Isometry3d prevWorldToBody_;
 
     void writeRawFile(cv::Mat1w & depth);
     void prefilterData(cv::Mat1w & depth);
@@ -73,26 +62,12 @@ class App{
     int output_counter_;
 
 
-    int get_trans_with_utime(BotFrames *bot_frames,
-        const char *from_frame, const char *to_frame, int64_t utime,
-        Eigen::Isometry3d & mat);
-
 };    
 
 App::App(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) : 
        lcm_(lcm_), cl_cfg_(cl_cfg_){
-
-  // Set up frames and config:
-  botparam_ = bot_param_new_from_server(lcm_->getUnderlyingLCM(), 0);
-  botframes_= bot_frames_get_global(lcm_->getUnderlyingLCM(), botparam_);
-
   //lcm_->subscribe("CAMERA",&App::imagesHandler,this);
-
   lcm_->subscribe("KINECT_FRAME",&App::kinectHandler,this);
-  int status = get_trans_with_utime( botframes_ ,  "KINECT_RGB", "body"  , 0, BodyToCamera_);
-  worldToBodyInit_ = Eigen::Isometry3d::Identity();
-  currWorldToBody_ = Eigen::Isometry3d::Identity();
-  prevWorldToBody_ = Eigen::Isometry3d::Identity();
 
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
@@ -111,16 +86,16 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) :
   icpOdom = new ICPOdometry(640, 480, 320, 240, 528, 528);
   icpSlowdom = new ICPSlowdometry(640, 480, 320, 240, 528, 528);
 
-  currImage_ = cv::Mat1w (480, 640);
-  currLocalToCamera_ = Eigen::Matrix4d::Identity();
+  currImage = cv::Mat1w (480, 640);
+  currPose = Eigen::Matrix4d::Identity();
   if (cl_cfg_.init_rotated){
-    currLocalToCamera_.topLeftCorner(3, 3) <<  0,  0, 1, -1,  0, 0, 0, -1, 0;
+    currPose.topLeftCorner(3, 3) <<  0,  0, 1, -1,  0, 0, 0, -1, 0;
   }
-  currUtime_ = 0;
+  currUtime = 0;
 
-  prevImage_ = cv::Mat1w(480, 640);
-  prevLocalToCamera_ = currLocalToCamera_;
-  prevUtime_ = currUtime_;
+  prevImage = cv::Mat1w(480, 640);
+  prevPose = currPose;
+  prevUtime = currUtime;
 
   init_ = false;
   output_counter_=0;
@@ -138,11 +113,11 @@ void quat_to_euler(Eigen::Quaterniond q, double& roll, double& pitch, double& ya
 
 
 // Difference the transform and scale by elapsed time:
-void getTransAsVelocityTrans(Eigen::Matrix4d secondPose, int64_t secondUtime, Eigen::Matrix4d firstPose, int64_t firstUtime, Eigen::Vector3d &linRate, Eigen::Vector3d &rotRate){
-  double elapsed_time = (secondUtime - firstUtime)*1E-6;
-  Eigen::Isometry3d secondPoseIso(secondPose);
-  Eigen::Isometry3d firstPoseIso(firstPose);
-  Eigen::Isometry3d deltaPoseIso = firstPoseIso.inverse()*secondPoseIso;
+void getTransAsVelocityTrans(Eigen::Matrix4d currPose, int64_t currUtime, Eigen::Matrix4d prevPose, int64_t prevUtime, Eigen::Vector3d &linRate, Eigen::Vector3d &rotRate){
+  double elapsed_time = (currUtime - prevUtime)*1E-6;
+  Eigen::Isometry3d currPoseIso(currPose);
+  Eigen::Isometry3d prevPoseIso(prevPose);
+  Eigen::Isometry3d deltaPoseIso = prevPoseIso.inverse()*currPoseIso;
   linRate = deltaPoseIso.translation()/elapsed_time;
   Eigen::Quaterniond deltaRotQuat =  Eigen::Quaterniond(deltaPoseIso.rotation());
   Eigen::Vector3d deltaRot;
@@ -160,13 +135,13 @@ void getTransAsVelocityTrans(Eigen::Matrix4d secondPose, int64_t secondUtime, Ei
   }
 }
 
-bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4d secondPose, int64_t secondUtime, Eigen::Matrix4d firstPose, int64_t firstUtime){
-  Eigen::Vector3d trans_out = secondPose.topRightCorner(3, 1);
-  Eigen::Matrix3d rot_out = secondPose.topLeftCorner(3, 3);
+bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4d currPose, int64_t currUtime, Eigen::Matrix4d prevPose, int64_t prevUtime){
+  Eigen::Vector3d trans_out = currPose.topRightCorner(3, 1);
+  Eigen::Matrix3d rot_out = currPose.topLeftCorner(3, 3);
   Eigen::Quaterniond r_x(rot_out);
 
   bot_core::pose_t pose_msg;
-  pose_msg.utime =   secondUtime;
+  pose_msg.utime =   currUtime;
   pose_msg.pos[0] = trans_out[0];
   pose_msg.pos[1] = trans_out[1];
   pose_msg.pos[2] = trans_out[2];
@@ -176,7 +151,7 @@ bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4d secondPose, int64_t secondUtim
   pose_msg.orientation[3] =  r_x.z();  
 
   Eigen::Vector3d linRate, rotRate;
-  getTransAsVelocityTrans(secondPose, secondUtime, firstPose, firstUtime, linRate, rotRate);
+  getTransAsVelocityTrans(currPose, currUtime, prevPose, prevUtime, linRate, rotRate);
   pose_msg.vel[0] = linRate[0];
   pose_msg.vel[1] = linRate[1];
   pose_msg.vel[2] = linRate[2];
@@ -185,11 +160,6 @@ bot_core::pose_t getPoseAsBotPose(Eigen::Matrix4d secondPose, int64_t secondUtim
   pose_msg.rotation_rate[2] = rotRate[2];
 
   return pose_msg;
-}
-
-bot_core::pose_t getPoseAsBotPose(Eigen::Isometry3d secondPose, int64_t secondUtime, Eigen::Isometry3d firstPose, int64_t firstUtime){
-  // TODO: I believe this conversion is correct, but should check:
-  return getPoseAsBotPose(secondPose.matrix(), secondUtime, firstPose.matrix(), firstUtime);
 }
 
 
@@ -257,22 +227,6 @@ uint64_t App::loadDepthNew(cv::Mat1w & depth){
 }
 
 
-int App::get_trans_with_utime(BotFrames *bot_frames,
-        const char *from_frame, const char *to_frame, int64_t utime,
-        Eigen::Isometry3d & mat){
-  int status;
-  double matx[16];
-  status = bot_frames_get_trans_mat_4x4_with_utime( bot_frames, from_frame,  to_frame, utime, matx);
-  for (int i = 0; i < 4; ++i) {
-    for (int j = 0; j < 4; ++j) {
-      mat(i,j) = matx[i*4+j];
-    }
-  }  
-
-  return status;
-}
-
-
 void App::writePngFile(cv::Mat1w & depth){
   for(unsigned int i = 0; i < 480; i++){
     for(unsigned int j = 0; j < 640; j++){
@@ -332,7 +286,7 @@ void App::writeRawFile(cv::Mat1w & depth){
 
 void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  kinect::frame_msg_t* msg){
-  currUtime_ = msg->timestamp;
+  currUtime = msg->timestamp;
 
   // 1. Capture data (or read file)
   if (cl_cfg_.process_incoming){
@@ -359,22 +313,22 @@ void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
     }
 
     if (cl_cfg_.verbose)
-      std::cout <<"Got kinect: " << currUtime_ << ", "
+      std::cout <<"Got kinect: " << currUtime << ", "
             <<"Compression: "<< (int) msg->depth.compression << ", Format: " << (int)msg->depth.depth_data_format << ", " 
             << msg->depth.depth_data_nbytes << "\n";
 
 
-    memcpy(currImage_.data,  depth_data, buffer_size);
-    //memcpy(currImage_.data,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
+    memcpy(currImage.data,  depth_data, buffer_size);
+    //memcpy(currImage.data,  msg->depth.depth_data.data() , msg->depth.depth_data_nbytes);
   }else{
-    // currUtime_ = loadDepth(prevImage_);
-    loadDepthNew(currImage_);
+    // currUtime = loadDepth(prevImage);
+    loadDepthNew(currImage);
   }
 
   // 2. Write data back out
-  // writePngFile(currImage_);
-  // prefilterData(currImage_);
-  // writeRawFile(currImage_);
+  // writePngFile(currImage);
+  // prefilterData(currImage);
+  // writeRawFile(currImage);
 
   // 3. Estimate motion:
   if (!init_){
@@ -386,40 +340,27 @@ void App::kinectHandler(const lcm::ReceiveBuffer* rbuf,
     int threads = 128; 
     int blocks = 48;
 
-    Eigen::Vector3f trans_f = currLocalToCamera_.topRightCorner(3, 1).cast <float> ();
-    Eigen::Matrix<float, 3, 3, Eigen::RowMajor> rot_f = currLocalToCamera_.topLeftCorner(3, 3).cast <float> ();
+    Eigen::Vector3f trans_f = currPose.topRightCorner(3, 1).cast <float> ();
+    Eigen::Matrix<float, 3, 3, Eigen::RowMajor> rot_f = currPose.topLeftCorner(3, 3).cast <float> ();
     if (!cl_cfg_.slow_mode){
-      icpOdom->initICPModel((unsigned short *)prevImage_.data, 20.0f, currLocalToCamera_.cast <float> () );
-      icpOdom->initICP((unsigned short *)currImage_.data, 20.0f);
+      icpOdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose.cast <float> () );
+      icpOdom->initICP((unsigned short *)currImage.data, 20.0f);
       icpOdom->getIncrementalTransformation(trans_f, rot_f, threads, blocks);
     }else{
-      icpSlowdom->initICPModel((unsigned short *)prevImage_.data, 20.0f, currLocalToCamera_.cast <float> () );
-      icpSlowdom->initICP((unsigned short *)currImage_.data, 20.0f);
+      icpSlowdom->initICPModel((unsigned short *)prevImage.data, 20.0f, currPose.cast <float> () );
+      icpSlowdom->initICP((unsigned short *)currImage.data, 20.0f);
       icpSlowdom->getIncrementalTransformation(trans_f, rot_f);
     }
-    currLocalToCamera_.topLeftCorner(3, 3) = rot_f.cast <double> ();
-    currLocalToCamera_.topRightCorner(3, 1) = trans_f.cast <double> ();
+    currPose.topLeftCorner(3, 3) = rot_f.cast <double> ();
+    currPose.topRightCorner(3, 1) = trans_f.cast <double> ();
   }
 
-
-
-  // 2. Determine the body position using the camera position:
-  Eigen::Isometry3d currLocalToCameraIso = Eigen::Isometry3d( currLocalToCamera_);
-  Eigen::Isometry3d currWorldToCamera = worldToBodyInit_*BodyToCamera_*currLocalToCameraIso;
-  currWorldToBody_ = currWorldToCamera * BodyToCamera_.inverse();
-
-  // 4. Pose of camera in its local coordinate frame:
-  bot_core::pose_t pose_msg_alt = getPoseAsBotPose( currLocalToCamera_ , currUtime_, prevLocalToCamera_ , prevUtime_);
-  lcm_->publish("POSE_BODY_ALT", &pose_msg_alt );
-  // Pose of the robot in its own frame
-  bot_core::pose_t pose_msg = getPoseAsBotPose( currWorldToBody_ , currUtime_, prevWorldToBody_ , prevUtime_);
+  // 4. Publish pose back
+  bot_core::pose_t pose_msg = getPoseAsBotPose( currPose , currUtime, prevPose , prevUtime);
   lcm_->publish("POSE_BODY", &pose_msg );
-
-  //
-  std::swap(prevImage_, currImage_); // second copied into first
-  prevWorldToBody_ = currWorldToBody_;
-  prevLocalToCamera_ = currLocalToCamera_;
-  prevUtime_ = currUtime_;
+  std::swap(prevImage, currImage); // second copied into first
+  prevPose = currPose;
+  prevUtime = currUtime;
 }
 
 int main(int argc, char **argv){
